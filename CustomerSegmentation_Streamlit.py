@@ -21,27 +21,30 @@ def read_customer_data(file, filename):
     """Read a CDNOW-style whitespace file or a CSV with the expected four columns."""
     if filename.lower().endswith(".csv"):
         raw = pd.read_csv(file)
-        if len(raw.columns) == 4:
+        normalized = {str(column).strip().lower(): column for column in raw.columns}
+        aliases = {
+            "customer_id": ("customer_id", "customerid", "customer"),
+            "day": ("day", "date", "order_date"),
+            "quantity": ("quantity", "qty"),
+            "sales": ("sales", "amount", "spend", "monetary"),
+        }
+        targets = ("customer_id", "day", "quantity", "sales")
+        matched = {
+            target: next((normalized[name] for name in aliases[target] if name in normalized), None)
+            for target in targets
+        }
+        if all(matched.values()):
+            raw = raw.rename(
+                columns={matched[target]: COLUMNS[index] for index, target in enumerate(targets)}
+            )[COLUMNS]
+        elif len(raw.columns) == 4:
+            # Header names are not recognized; follow the documented positional schema.
             raw.columns = COLUMNS
         else:
-            normalized = {str(column).strip().lower(): column for column in raw.columns}
-            aliases = {
-                "customer_id": ("customer_id", "customerid", "customer"),
-                "day": ("day", "date", "order_date"),
-                "quantity": ("quantity", "qty"),
-                "sales": ("sales", "amount", "spend", "monetary"),
-            }
-            rename = {}
-            targets = ("customer_id", "day", "quantity", "sales")
-            for target in targets:
-                found = next((normalized[name] for name in aliases[target] if name in normalized), None)
-                if found is None:
-                    raise ValueError(
-                        "CSV must contain Customer_id, day, Quantity, and Sales columns "
-                        "or exactly four columns in that order."
-                    )
-                rename[found] = COLUMNS[targets.index(target)]
-            raw = raw.rename(columns=rename)[COLUMNS]
+            raise ValueError(
+                "CSV must contain customer ID, date, quantity, and sales columns, "
+                "or exactly four columns in that order."
+            )
     else:
         raw = pd.read_csv(
             file, sep=r"\s+", header=None, names=COLUMNS, encoding="latin-1"
