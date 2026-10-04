@@ -1,429 +1,212 @@
+from pathlib import Path
+
 import pandas as pd
-import matplotlib.pyplot as plt
-import seaborn as sns
 import plotly.express as px
-from sklearn.cluster import KMeans
-import pickle
 import streamlit as st
-import os
-from datetime import datetime
-import squarify
-import base64
+from sklearn.cluster import KMeans
+from sklearn.metrics import silhouette_score
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import StandardScaler
 
-# GUI setup
-st.title("Data Science & Machine Learning Project")
-st.header("Customer Segmentation", divider='rainbow')
+st.set_page_config(page_title="Customer Segmentation", page_icon="👥", layout="wide")
+st.title("Customer Segmentation")
+st.caption("Explore customer purchase behavior with Recency, Frequency, and Monetary (RFM) features.")
 
-menu = ["Business Understanding", "Data Understanding","Data preparation","Modeling & Evaluation","Predict"] # , "BigData: Spark"
-choice = st.sidebar.selectbox('Menu', menu)
+DATA_DIR = Path(__file__).parent / "data"
+COLUMNS = ["Customer_id", "day", "Quantity", "Sales"]
+RFM_COLUMNS = ["Recency", "Frequency", "Monetary"]
 
-def load_data(uploaded_file):
-    if uploaded_file is not None:
-        st.sidebar.success("File uploaded successfully!")
-        df = pd.read_csv(uploaded_file, encoding='latin-1', sep='\s+', header=None, names=['Customer_id', 'day', 'Quantity', 'Sales'])
-        df.to_csv("CDNOW_master_new.txt", index=False)
-        df['day'] = pd.to_datetime(df['day'], format='%Y%m%d')
-        st.session_state['df'] = df
-        return df
-    else:
-        st.write("Please upload a data file to proceed.")
-        return None
 
-# Hàm để tạo liên kết tải xuống CSV
-def csv_download_link(df, csv_file_name, download_link_text):
-    csv_data = df.to_csv(index=True)
-    b64 = base64.b64encode(csv_data.encode()).decode()
-    href = f'<a href="data:file/csv;base64,{b64}" download="{csv_file_name}">{download_link_text}</a>'
-    st.markdown(href, unsafe_allow_html=True)    
-# Initializing session state variables
-if 'df' not in st.session_state:
-    st.session_state['df'] = None
-
-if 'uploaded_file' not in st.session_state:
-    st.session_state['uploaded_file'] = None
-
-# Main Menu
-if choice == 'Business Understanding':
-    st.subheader("Business Objective")
-    st.write("""
-    ###### Customer segmentation is a fundamental task in marketing and customer relationship management. With the advancements in data analytics and machine learning, it is now possible to group customers into distinct segments with a high degree of precision, allowing businesses to tailor their marketing strategies and offerings to each segment's unique needs and preferences.
-
-    ###### Through this customer segmentation, businesses can achieve:
-    - **Personalization**: Tailoring marketing strategies to meet the unique needs of each segment.
-    - **Optimization**: Efficient allocation of marketing resources.
-    - **Insight**: Gaining a deeper understanding of the customer base.
-    - **Engagement**: Enhancing customer engagement and satisfaction.
-
-    ###### => Problem/Requirement: Utilize machine learning and data analysis techniques in Python to perform customer segmentation.
-    """)
-    st.image("Customer-Segmentation.png", caption="Customer Segmentation", use_column_width=True)
-
-    
-elif choice == 'Data Understanding':    
-
-    # Liệt kê tất cả các file trong thư mục 'sample_data'
-    sample_files = os.listdir('data')
-    
-    # Tạo một radio button để cho phép người dùng chọn giữa việc sử dụng file mẫu hoặc tải lên file mới
-    data_source = st.sidebar.radio('Data source', ['Use a sample file', 'Upload a new file'])
-    
-    if data_source == 'Use a sample file':
-        # Cho phép người dùng chọn một file từ danh sách
-        selected_file = st.sidebar.selectbox('Choose a sample file', sample_files)
-        
-        # Đọc file được chọn (bạn sẽ cần thêm logic để đọc file tại đây)
-        file_path = os.path.join('data', selected_file)
-        st.session_state['uploaded_file'] = open(file_path, 'r')
-        load_data(st.session_state['uploaded_file'])
-
-    else:
-        # Cho phép người dùng tải lên một file mới
-        st.session_state['uploaded_file'] = st.sidebar.file_uploader("Choose a file", type=['txt'])
-        
-        if st.session_state['uploaded_file'] is not None:
-            load_data(st.session_state['uploaded_file'])
-
-    # st.session_state['uploaded_file'] = st.sidebar.file_uploader("Choose a file", type=['txt'])
-    # load_data(st.session_state['uploaded_file'])
-    
-    if st.session_state['df'] is not None:
-        st.write("### Data Overview")
-        st.write("Number of rows:", st.session_state['df'].shape[0])
-        st.write("Number of columns:", st.session_state['df'].shape[1])
-        st.write("First five rows of the data:")
-        st.write(st.session_state['df'].head())
-
-elif choice == 'Data preparation': 
-    st.write("### Data Cleaning")
-    
-    if st.session_state['df'] is not None:
-        # 1. Handling missing, null, and duplicate values
-        st.write("Number of missing values:")
-        st.write(st.session_state['df'].isnull().sum())
-
-        st.write("Number of NA values:")
-        st.write((st.session_state['df'] == 'NA').sum())
-
-        st.write("Number of duplicate rows:", st.session_state['df'].duplicated().sum())
-
-        # Providing options for handling missing and duplicate values
-        if st.checkbox('Remove duplicate rows'):
-            st.session_state['df'].drop_duplicates(inplace=True)
-            st.write("Duplicate rows removed.")
-        
-        if st.checkbox('Remove rows with NA values'):
-            st.session_state['df'].replace('NA', pd.NA, inplace=True)
-            st.session_state['df'].dropna(inplace=True)
-            st.write("Rows with NA values removed.")
-
-        # 2. Display number of unique values for each column
-        st.write("Number of unique values for each column:")
-        st.write(st.session_state['df'].nunique())
-
-        # 3. Plotting distribution for numeric columns
-        st.write("### Distribution plots")
-        for col in st.session_state['df'].select_dtypes(include=['number']).columns:
-            st.write(f"#### {col}")
-            fig, ax = plt.subplots()
-            st.session_state['df'][col].hist(ax=ax)
-            st.pyplot(fig)
-
-        # 4. Display boxplots for numeric columns
-        st.write("### Boxplots for numeric columns")
-        for col in st.session_state['df'].select_dtypes(include=['number']).columns:
-            st.write(f"#### {col}")
-            fig, ax = plt.subplots()
-            st.session_state['df'].boxplot(column=col, ax=ax)
-            st.pyplot(fig)
-
-        # Additional Data Overview
-        st.write("Transactions timeframe from {} to {}".format(st.session_state['df']['day'].min(), st.session_state['df']['day'].max()))
-        st.write("{:,} transactions don't have a customer id".format(st.session_state['df'][st.session_state['df'].Customer_id.isnull()].shape[0]))
-        st.write("{:,} unique customer_id".format(len(st.session_state['df'].Customer_id.unique())))
-
-        # Add Data Transformation ['Customer_id', 'day', 'Quantity', 'Sales']
-        st.write("### Data Transformation")
-        # Group the data by Customer_id and sum the other columns, excluding 'day'
-        user_grouped = st.session_state['df'].groupby('Customer_id').agg({'Quantity': 'sum', 'Sales': 'sum'})
-        st.write("### User Grouped Data")
-        st.write(user_grouped.head())
-
-        # Create a new column for the month
-        st.session_state['df']['month'] = st.session_state['df']['day'].values.astype('datetime64[M]')
-        st.write("### Data with Month Column")
-        st.write(st.session_state['df'].head())
-
-        # Plot the total Sales per month
-        st.write("### Total Sales per Month")
-        dfm = st.session_state['df'].groupby('month')['Quantity'].sum()
-        st.line_chart(dfm)
-
-        # Plot the total Quantity per month
-        st.write("### Total Quantity per Month")
-        dfpc = st.session_state['df'].groupby('month')['Sales'].sum()
-        st.line_chart(dfpc)
-
-        # ... (rest of your code, don't forget to modify scatter plots too)
-
-        st.write("### Scatter Plot: Sales vs Quantity for Individual Transactions")
-        fig, ax = plt.subplots()
-        ax.scatter(st.session_state['df']['Sales'], st.session_state['df']['Quantity'])
-        st.pyplot(fig)
-
-        st.write("### Scatter Plot: Sales vs Quantity for User Grouped Data")
-        fig, ax = plt.subplots()
-        ax.scatter(user_grouped['Sales'], user_grouped['Quantity'])
-        st.pyplot(fig)
-    else:
-        st.write("No data available. Please upload a file in the 'Data Understanding' section.")
-    
-    # User Feedback section
-    st.write("### User Feedback")
-    user_feedback = st.text_area("Please share your comments or feedback:", value='')
-
-    if st.button("Submit Feedback"):
-        # Store the feedback with timestamp in a DataFrame
-        current_time = datetime.now()
-        feedback_df = pd.DataFrame({
-            'Time': [current_time],
-            'Feedback': [user_feedback]
-        })
-
-        # Check if feedback file already exists
-        if not os.path.isfile('feedback.csv'):
-            feedback_df.to_csv('feedback.csv', index=False)
-        else: # Append the new feedback without writing headers
-            feedback_df.to_csv('feedback.csv', mode='a', header=False, index=False)
-
-        st.success("Your feedback has been recorded!")
-
-    # Display the 5 most recent feedbacks
-    if os.path.isfile('feedback.csv'):
-        all_feedbacks = pd.read_csv('feedback.csv')
-        all_feedbacks.sort_values('Time', ascending=False, inplace=True)
-        st.write("### 5 Most Recent Feedbacks:")
-        st.write(all_feedbacks.head(5))
-
-elif choice == 'Modeling & Evaluation':
-    st.write("### Modeling With KMeans")
-    if st.session_state['df'] is not None:
-        # RFM Analysis
-        recent_date = st.session_state['df']['day'].max()
-
-        # Calculate Recency, Frequency, and Monetary value for each customer
-        df_RFM = st.session_state['df'].groupby('Customer_id').agg({
-            'day': lambda x: (recent_date - x.max()).days, # Recency
-            'Customer_id': 'count', # Frequency
-            'Sales': 'sum' # Monetary
-        }).rename(columns={'day': 'Recency', 'Customer_id': 'Frequency', 'Sales': 'Monetary'})
-
-        st.title('Phân Tích KMeans sử dụng Phương pháp Elbow')
-
-        # Xây dựng và hiển thị biểu đồ Elbow Method
-        sse = {}
-        for k in range(1, 20):
-            kmeans = KMeans(n_clusters=k, random_state=42)
-            kmeans.fit(df_RFM)
-            sse[k] = kmeans.inertia_
-
-        fig, ax = plt.subplots()
-        ax.set_title('Phương pháp Elbow')
-        ax.set_xlabel('Số cụm (k)')
-        ax.set_ylabel('Tổng Bình phương các khoảng cách')
-        sns.pointplot(x=list(sse.keys()), y=list(sse.values()), ax=ax)
-        st.pyplot(fig)
-
-        # Cho phép người dùng chọn số lượng cụm k 
-        n_clusters = st.sidebar.number_input('Chọn số lượng cụm k từ 2 đến 20:', min_value=2, max_value=20, value=3, step=1, key="cluster_value")
-        st.write(f'Bạn đã chọn phân thành {n_clusters} cụm.')
-
-        # Áp dụng mô hình KMeans với số lượng cụm đã chọn
-        model = KMeans(n_clusters=n_clusters, random_state=42)
-        model.fit(df_RFM)
-
-        df_sub = df_RFM.copy()
-        df_sub['Cluster'] = model.labels_
-
-        # Thống kê mô tả và thống kê theo từng cụm
-        cluster_stats = df_sub.groupby('Cluster').agg({
-            'Recency': 'mean',
-            'Frequency': 'mean',
-            'Monetary': ['mean', 'count']
-        }).round(2)
-
-        cluster_stats.columns = ['RecencyMean', 'FrequencyMean', 'MonetaryMean', 'Count']
-        cluster_stats['Percent'] = (cluster_stats['Count'] / cluster_stats['Count'].sum() * 100).round(2)
-
-        # Reset index để 'Cluster' trở thành một cột thông thường, thay vì index
-        cluster_stats.reset_index(inplace=True)
-
-        # Đổi tên các nhóm cụm để dễ đọc hơn
-        cluster_stats['Cluster'] = 'Cụm ' + cluster_stats['Cluster'].astype('str')
-
-        st.subheader('Thống kê theo từng Cụm')
-        st.dataframe(cluster_stats)
-
-        # Biểu đồ Scatter
-        fig_scatter = px.scatter(
-            cluster_stats,
-            x='RecencyMean',
-            y='MonetaryMean',
-            size='FrequencyMean',
-            color='Cluster',
-            log_x=True,
-            size_max=60
-        )
-        st.plotly_chart(fig_scatter, use_container_width=True)
-        
-        # Biểu đồ Tree Map
-        # Thiết lập màu sắc cho từng cụm - bạn có thể thay đổi này theo ý của bạn
-        colors_dict = {
-            0: 'green',
-            1: 'red',
-            2: 'royalblue',
-            3: 'orange',
-            4: 'purple'
+def read_customer_data(file, filename):
+    """Read a CDNOW-style whitespace file or a CSV with the expected four columns."""
+    if filename.lower().endswith(".csv"):
+        raw = pd.read_csv(file)
+        normalized = {str(column).strip().lower(): column for column in raw.columns}
+        aliases = {
+            "customer_id": ("customer_id", "customerid", "customer"),
+            "day": ("day", "date", "order_date"),
+            "quantity": ("quantity", "qty"),
+            "sales": ("sales", "amount", "spend", "monetary"),
         }
-        fig_treemap, ax_treemap = plt.subplots()  # Tạo đối tượng fig và ax riêng biệt cho biểu đồ Tree Map
-        fig_treemap.set_size_inches(14, 10)
-
-        squarify.plot(sizes=cluster_stats['Count'], 
-                    label=[f'Cụm {i}\n{row.RecencyMean} ngày\n{row.FrequencyMean} đơn hàng\n{row.MonetaryMean} $\n{row.Count} khách hàng ({row.Percent}%)' 
-                            for i, row in cluster_stats.iterrows()],
-                    color=[colors_dict.get(cluster) for cluster in cluster_stats.index],
-                    alpha=0.6,
-                    text_kwargs={'fontsize':12, 'fontweight':'bold'})
-
-        ax_treemap.set_title("Phân Khúc Khách Hàng", fontsize=26, fontweight="bold")
-        ax_treemap.axis('off')
-        st.pyplot(fig_treemap)
-
-        # Vẽ biểu đồ 3D scatter plot
-        fig_3d = px.scatter_3d(
-            cluster_stats,
-            x='RecencyMean',
-            y='FrequencyMean',
-            z='MonetaryMean',
-            color='Cluster',
-            size='Count',
-            labels={'RecencyMean': 'Recency', 'FrequencyMean': 'Frequency', 'MonetaryMean': 'Monetary'}
+        targets = ("customer_id", "day", "quantity", "sales")
+        matched = {
+            target: next((normalized[name] for name in aliases[target] if name in normalized), None)
+            for target in targets
+        }
+        if all(matched.values()):
+            raw = raw.rename(
+                columns={matched[target]: COLUMNS[index] for index, target in enumerate(targets)}
+            )[COLUMNS]
+        elif len(raw.columns) == 4:
+            # Header names are not recognized; follow the documented positional schema.
+            raw.columns = COLUMNS
+        else:
+            raise ValueError(
+                "CSV must contain customer ID, date, quantity, and sales columns, "
+                "or exactly four columns in that order."
+            )
+    else:
+        raw = pd.read_csv(
+            file, sep=r"\s+", header=None, names=COLUMNS, encoding="latin-1"
         )
 
-        st.plotly_chart(fig_3d, use_container_width=True)
+    if raw.empty:
+        raise ValueError("The selected file has no data rows.")
+    raw["Customer_id"] = raw["Customer_id"].astype("string").str.strip()
+    raw["day"] = pd.to_datetime(
+        raw["day"].astype("string").str.replace(r"\.0$", "", regex=True),
+        errors="coerce",
+    )
+    raw["Quantity"] = pd.to_numeric(raw["Quantity"], errors="coerce")
+    raw["Sales"] = pd.to_numeric(raw["Sales"], errors="coerce")
+    raw = raw.dropna(subset=COLUMNS)
+    raw = raw[raw["Customer_id"] != ""]
+    if raw.empty:
+        raise ValueError("No usable rows remain. Check the customer IDs, dates, quantities, and sales.")
+    return raw
 
-        # Thêm nút để xuất mô hình
-        if st.button('Xuất Mô Hình'):
-            # Lưu mô hình vào một tập tin .pkl
-            with open('kmeans_model.pkl', 'wb') as f:
-                pickle.dump((model, cluster_stats), f)
-            
-            st.session_state.model_exported = True
-            st.write('Mô hình (kmeans_model.pkl) đã được xuất thành công!')
 
-        # User Feedback section
-        st.write("### User Feedback")
-        user_feedback = st.text_area("Please share your comments or feedback:", value='')
+@st.cache_data(show_spinner=False)
+def load_sample(path):
+    return read_customer_data(path, path.name)
 
-        if st.button("Submit Feedback"):
-            # Store the feedback with timestamp in a DataFrame
-            current_time = datetime.now()
-            feedback_df = pd.DataFrame({
-                'Time': [current_time],
-                'Feedback': [user_feedback]
-            })
 
-            # Check if feedback file already exists
-            if not os.path.isfile('feedback.csv'):
-                feedback_df.to_csv('feedback.csv', index=False)
-            else: # Append the new feedback without writing headers
-                feedback_df.to_csv('feedback.csv', mode='a', header=False, index=False)
-
-            st.success("Your feedback has been recorded!")
-
-        # Display the 5 most recent feedbacks
-        if os.path.isfile('feedback.csv'):
-            all_feedbacks = pd.read_csv('feedback.csv')
-            all_feedbacks.sort_values('Time', ascending=False, inplace=True)
-            st.write("### 5 Most Recent Feedbacks:")
-            st.write(all_feedbacks.head(5))
-
+with st.sidebar:
+    st.header("Data")
+    data_source = st.radio("Choose a source", ["Sample file", "Upload a file"])
+    data = None
+    if data_source == "Sample file":
+        sample_files = sorted(DATA_DIR.glob("*.txt")) + sorted(DATA_DIR.glob("*.csv"))
+        if not sample_files:
+            st.info("Add a .txt or .csv sample to the data/ folder, or choose Upload a file.")
+        else:
+            sample_path = st.selectbox("Sample dataset", sample_files, format_func=lambda p: p.name)
+            try:
+                data = load_sample(sample_path)
+            except (OSError, ValueError, pd.errors.ParserError) as exc:
+                st.error(f"Could not read the sample file: {exc}")
     else:
-        st.write("No data available. Please upload a file in the 'Data Understanding' section.")
+        uploaded = st.file_uploader("Choose CDNOW .txt or .csv data", type=["txt", "csv"])
+        if uploaded is not None:
+            try:
+                data = read_customer_data(uploaded, uploaded.name)
+            except (ValueError, pd.errors.ParserError, UnicodeDecodeError) as exc:
+                st.error(f"Could not read the uploaded file: {exc}")
 
-elif choice == 'Predict':
-    
-    if 'model_exported' in st.session_state and st.session_state.model_exported:
-        # Tải lại mô hình và cluster_stats
-        with open('kmeans_model.pkl', 'rb') as f:
-            model, cluster_stats = pickle.load(f)
+if data is None:
+    st.info("Choose a valid sample dataset or upload a file to get started.")
+    st.stop()
 
-        st.subheader('Thống kê theo từng Cụm')
-        st.dataframe(cluster_stats)
-        
-        # Phần mới thêm để nhận dữ liệu từ người dùng và dự đoán
-        st.subheader("Dự đoán Cụm cho một Khách hàng mới")
-                
-        # Nhận dữ liệu từ người dùng
-        customer_name = st.text_input('Tên Khách hàng:')
-        recent_date = st.date_input('Ngày mua hàng gần nhất:')
-        quantity = st.number_input('Số lượng:', min_value=0)
-        monetary = st.number_input('Số tiền:', min_value=0.0)
-        
-        if 'df_new' not in st.session_state:
-            st.session_state['df_new'] = pd.DataFrame(columns=['Customer_id', 'day', 'Quantity', 'Sales'])
+# Include every input column so even same-size datasets invalidate an old model.
+fingerprint = int(pd.util.hash_pandas_object(data, index=True).sum())
+if st.session_state.get("data_fingerprint") != fingerprint:
+    st.session_state["data_fingerprint"] = fingerprint
+    st.session_state.pop("segmentation", None)
 
-        if st.button("Add"):
-            new_data = pd.DataFrame({'Customer_id': [customer_name], 'day': [recent_date], 'Quantity': [quantity], 'Sales': [monetary]})
-            if 'df_new' not in st.session_state:
-                st.session_state['df_new'] = new_data
-            else:
-                st.session_state['df_new'] = pd.concat([st.session_state['df_new'], new_data], ignore_index=True)
-            
-        st.write("Dữ liệu đã thêm:")
-        st.dataframe(st.session_state['df_new'])  # Hiển thị DataFrame sau khi người dùng nhấn "Add"
+snapshot_date = data["day"].max() + pd.Timedelta(days=1)
+rfm = data.groupby("Customer_id").agg(
+    Recency=("day", lambda dates: (snapshot_date - dates.max()).days),
+    Frequency=("Customer_id", "size"),
+    Monetary=("Sales", "sum"),
+)
+rfm = rfm.replace([float("inf"), -float("inf")], pd.NA).dropna(subset=RFM_COLUMNS)
 
-        # Khi người dùng nhấn nút "Dự đoán", tiến hành dự đoán cụm
-        if st.button("Dự đoán"):
-            # Tính toán giá trị Recency, Frequency, và Monetary
-            recent_date = pd.Timestamp.now().date()  # Cập nhật ngày hiện tại
-            df_RFM = st.session_state['df_new'].groupby('Customer_id').agg({
-                'day': lambda x: (recent_date - x.max()).days,  # Recency
-                'Customer_id': 'count',  # Frequency
-                'Sales': 'sum'  # Monetary
-            }).rename(columns={'day': 'Recency', 'Customer_id': 'Frequency', 'Sales': 'Monetary'})
+m1, m2, m3 = st.columns(3)
+m1.metric("Valid transactions", f"{len(data):,}")
+m2.metric("Customers", f"{len(rfm):,}")
+m3.metric("Date range", f"{data['day'].min():%Y-%m-%d} – {data['day'].max():%Y-%m-%d}")
+with st.expander("Preview and data quality"):
+    st.caption("Invalid or incomplete rows are removed during loading. The preview shows the cleaned data.")
+    st.dataframe(data.head(10), use_container_width=True)
+    st.dataframe(rfm.describe().round(2), use_container_width=True)
 
-            # Dự đoán cụm sử dụng mô hình đã huấn luyện
-            cluster_pred = model.predict(df_RFM)
-            
-            # Thêm cột dự đoán vào df_RFM
-            df_RFM['Cluster'] = cluster_pred
+st.subheader("Customer segments")
+if len(rfm) < 3:
+    st.warning("At least three customers are needed to compare and fit customer segments.")
+else:
+    max_k = min(10, len(rfm) - 1)
+    scaled = StandardScaler().fit_transform(rfm[RFM_COLUMNS])
+    scored = []
+    for k in range(2, max_k + 1):
+        candidate = KMeans(n_clusters=k, random_state=42, n_init=10)
+        labels = candidate.fit_predict(scaled)
+        if 1 < len(set(labels)) < len(rfm):
+            scored.append((k, silhouette_score(scaled, labels)))
 
-            # Hiển thị DataFrame kết quả
-            st.write("Kết quả dự đoán:")
-            st.dataframe(df_RFM)
-            
-            # Cho phép người dùng tải xuống kết quả dưới dạng CSV
-            csv_download_link(df_RFM, 'RFM_prediction_results.csv', 'Tải xuống kết quả dự đoán')
-        
+    if not scored:
+        st.warning("The selected data does not support a meaningful multi-cluster solution.")
     else:
-        st.write("Bạn phải xuất mô hình trước khi tiến hành dự đoán.")
+        score_table = pd.DataFrame(scored, columns=["Clusters", "Silhouette score"])
+        recommended_k = int(score_table.loc[score_table["Silhouette score"].idxmax(), "Clusters"])
+        default_index = next(i for i, (k, _) in enumerate(scored) if k == recommended_k)
+        selected_k = st.selectbox(
+            "Number of clusters",
+            options=[k for k, _ in scored],
+            index=default_index,
+            help="Suggested value: the tested cluster count with the highest silhouette score.",
+        )
+        if st.button("Build segments", type="primary"):
+            pipeline = Pipeline(
+                [
+                    ("scaler", StandardScaler()),
+                    ("kmeans", KMeans(n_clusters=selected_k, random_state=42, n_init=10)),
+                ]
+            )
+            labels = pipeline.fit_predict(rfm[RFM_COLUMNS])
+            result = rfm.copy()
+            result["Segment"] = labels.astype(str)
+            st.session_state["segmentation"] = {
+                "pipeline": pipeline,
+                "segments": result,
+                "cluster_count": selected_k,
+            }
 
-    # User Feedback section
-    st.write("### User Feedback")
-    user_feedback = st.text_area("Please share your comments or feedback:", value='')
+        st.caption(f"Suggested cluster count: {recommended_k} (best of the tested silhouette scores).")
+        st.dataframe(score_table.round(3), use_container_width=True)
 
-    if st.button("Submit Feedback"):
-        # Store the feedback with timestamp in a DataFrame
-        current_time = datetime.now()
-        feedback_df = pd.DataFrame({
-            'Time': [current_time],
-            'Feedback': [user_feedback]
-        })
+segmentation = st.session_state.get("segmentation")
+if segmentation:
+    segments = segmentation["segments"]
+    st.success(
+        f"Built {segmentation['cluster_count']} segments. IDs are model labels; profile them before assigning marketing names."
+    )
+    profile = segments.groupby("Segment").agg(
+        Customers=("Recency", "size"),
+        Recency=("Recency", "mean"),
+        Frequency=("Frequency", "mean"),
+        Monetary=("Monetary", "mean"),
+    ).round(2)
+    profile["Customer share (%)"] = (profile["Customers"] / len(segments) * 100).round(1)
+    left, right = st.columns(2)
+    left.dataframe(profile, use_container_width=True)
+    right.plotly_chart(
+        px.scatter(
+            segments.reset_index(),
+            x="Recency",
+            y="Monetary",
+            size="Frequency",
+            color="Segment",
+            hover_data=["Customer_id"],
+            title="Customer RFM profile",
+        ),
+        use_container_width=True,
+    )
+    st.download_button(
+        "Download customer segments",
+        segments.reset_index().to_csv(index=False).encode("utf-8"),
+        file_name="customer_segments.csv",
+        mime="text/csv",
+    )
 
-        # Check if feedback file already exists
-        if not os.path.isfile('feedback.csv'):
-            feedback_df.to_csv('feedback.csv', index=False)
-        else: # Append the new feedback without writing headers
-            feedback_df.to_csv('feedback.csv', mode='a', header=False, index=False)
-
-        st.success("Your feedback has been recorded!")
+    st.subheader("Assign a customer to a segment")
+    st.caption("Enter RFM values calculated with the same definitions and snapshot date as the training data.")
+    c1, c2, c3 = st.columns(3)
+    recency = c1.number_input("Recency (days)", min_value=0, value=int(rfm["Recency"].median()))
+    frequency = c2.number_input(
+        "Frequency (transactions)", min_value=1, value=max(1, int(rfm["Frequency"].median()))
+    )
+    monetary = c3.number_input("Monetary (total sales)", value=float(rfm["Monetary"].median()))
+    if st.button("Assign segment"):
+        customer = pd.DataFrame([[recency, frequency, monetary]], columns=RFM_COLUMNS)
+        segment_id = segmentation["pipeline"].predict(customer)[0]
+        st.info(f"Assigned to Segment {segment_id}.")

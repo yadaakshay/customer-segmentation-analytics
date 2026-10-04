@@ -1,10 +1,4 @@
-matplotlib
-plotly
-scikit-learn
-streamlit
-seaborn
-squarify
-import-ipynb
-utils
-squarify
-findspark
+pandas>=2.0
+plotly>=5.20
+scikit-learn>=1.3
+streamlit>=1.37
